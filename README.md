@@ -359,5 +359,3 @@ This project is for portfolio and educational purposes.
 <p align="center">
   Built with ☕ by <a href="https://github.com/TiagoAReiz">Tiago Reiz</a>
 </p>
-#   f a s t d o c s  
- 
