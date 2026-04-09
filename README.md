@@ -147,7 +147,7 @@ cp backend/.env.example backend/.env
 docker compose up --build
 ```
 
-This starts **7 services**: FastAPI backend, Celery worker, Outbox relay, PostgreSQL (pgvector), Redis, and Azurite.
+This starts **6 services**: FastAPI backend, Celery worker, Outbox relay, PostgreSQL (pgvector), Redis, and Azurite.
 
 ### 3. Verify
 
@@ -237,7 +237,7 @@ curl http://localhost:8000/api/chat/history \
 
 ```
 fastdocs/
-├── docker-compose.yml          # All 7 services
+├── docker-compose.yml          # All 6 services
 ├── azurite.Dockerfile          # Azure Blob emulator setup
 │
 └── backend/
@@ -337,13 +337,13 @@ fastdocs/
 - [x] Outbox Pattern with LISTEN/NOTIFY
 - [x] LangGraph RAG agent
 - [x] Chat with threaded history
-- [x] Docker Compose (7 services)
-- [ ] Alembic migrations
+- [x] Docker Compose (6 services)
+- [x] Alembic migrations
+- [x] SSE streaming responses
+- [x] Scanned PDF OCR (Tesseract)
 - [ ] Admin endpoints (tenant/key management)
-- [ ] SSE streaming responses
 - [ ] Rate limiting middleware
 - [ ] Query cache with Redis
-- [ ] Scanned PDF OCR (Tesseract)
 - [ ] Webhook callbacks
 - [ ] Test suite (pytest)
 - [ ] CI/CD with GitHub Actions
@@ -359,3 +359,5 @@ This project is for portfolio and educational purposes.
 <p align="center">
   Built with ☕ by <a href="https://github.com/TiagoAReiz">Tiago Reiz</a>
 </p>
+#   f a s t d o c s  
+ 
