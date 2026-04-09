@@ -4,7 +4,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import init_db
 from app.core.graph import CheckpointerManager
 from app.core.storage import get_container_client
 from app.routers import chat, documents, projects
@@ -12,7 +11,6 @@ from app.routers import chat, documents, projects
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
     get_container_client()
     app.state.checkpointer = CheckpointerManager()
     await app.state.checkpointer.start()

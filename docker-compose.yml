@@ -1,6 +1,8 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
     ports:
       - "8000:8000"
     volumes:
@@ -16,8 +18,9 @@ services:
         condition: service_healthy
 
   celery-worker:
-    build: ./backend
-    command: celery -A app.core.celery_app worker --loglevel=info
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
     volumes:
       - ./backend:/app
     env_file:
@@ -31,8 +34,9 @@ services:
         condition: service_healthy
 
   outbox-relay:
-    build: ./backend
-    command: python -m app.services.outbox_relay
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.relay
     volumes:
       - ./backend:/app
     env_file:
