@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Form, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.routers.deps import get_current_tenant
+from app.routers.deps import get_current_tenant, rate_limit_ingest
 from app.schemas.deps import PaginationParams, TenantContext
 from app.schemas.document import (
     DocumentDetailResponse,
@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/documents", tags=["Documents"])
     "/upload",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rate_limit_ingest)],
 )
 async def upload_document(
     file: UploadFile,
@@ -36,6 +37,7 @@ async def list_documents(
     pagination: PaginationParams = Depends(),
     search: str | None = None,
     doc_status: str | None = None,
+    id_project: UUID | None = None,
     tenant: TenantContext = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -46,6 +48,7 @@ async def list_documents(
         pagination.page_size,
         search=search,
         doc_status=doc_status,
+        id_project=id_project,
     )
 
 

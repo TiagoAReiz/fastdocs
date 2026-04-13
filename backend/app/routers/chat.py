@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.routers.deps import get_checkpointer, get_current_tenant
+from app.routers.deps import get_checkpointer, get_current_tenant, rate_limit_query
 from app.schemas.chat import (
     ChatMessageRequest,
     ChatMessageResponse,
@@ -18,7 +18,7 @@ from app.services import chat_service
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 
-@router.post("/message")
+@router.post("/message", dependencies=[Depends(rate_limit_query)])
 async def send_message(
     body: ChatMessageRequest,
     tenant: TenantContext = Depends(get_current_tenant),

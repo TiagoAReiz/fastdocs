@@ -16,6 +16,7 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
+    restart: unless-stopped
 
   celery-worker:
     build:
@@ -32,6 +33,23 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    command: celery -A app.core.celery_app beat --loglevel=info
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   outbox-relay:
     build:
@@ -48,6 +66,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -64,6 +83,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis/redis-stack-server:7.4.0-v0
@@ -76,6 +96,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
   azurite:
     build:
@@ -92,6 +113,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -102,9 +102,10 @@ async def list_documents(
     page_size: int,
     search: str | None = None,
     doc_status: str | None = None,
+    id_project: UUID | None = None,
 ) -> DocumentListResponse:
     items, total = await document_repo.list_by_tenant(
-        db, tenant.tenant_id, page, page_size, search=search, status=doc_status
+        db, tenant.tenant_id, page, page_size, search=search, status=doc_status, project_id=id_project,
     )
     return DocumentListResponse(
         documents=[_to_summary(d) for d in items],

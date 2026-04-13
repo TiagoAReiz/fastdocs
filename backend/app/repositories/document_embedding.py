@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.document import Document
 from app.models.document_embedding import DocumentEmbedding
 
 
@@ -29,9 +30,11 @@ async def similarity_search(
     distance = DocumentEmbedding.embedding.cosine_distance(embedding).label("distance")
     result = await db.execute(
         select(DocumentEmbedding, distance)
+        .join(Document, DocumentEmbedding.id_document == Document.id)
         .where(
             DocumentEmbedding.id_project == project_id,
             DocumentEmbedding.id_tenant == tenant_id,
+            Document.deleted_at.is_(None),
         )
         .order_by(distance)
         .limit(limit)

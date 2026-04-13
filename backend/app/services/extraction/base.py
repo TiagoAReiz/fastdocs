@@ -25,3 +25,4 @@ class ExtractionResult:
     sections: list[Section]
     extraction_method: str = "native"  # "native" | "tesseract"
     document_metadata: dict[str, Any] = field(default_factory=dict)
+    extraction_notes: str = ""

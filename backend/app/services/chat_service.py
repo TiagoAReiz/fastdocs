@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -6,6 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.redis_client import cache_get, cache_set
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.repositories import chat_message as chat_message_repo
@@ -23,6 +26,11 @@ from app.schemas.deps import TenantContext
 from app.services.rag_graph import build_rag_graph
 
 HISTORY_LIMIT = 10
+
+
+def _cache_key(tenant_id: UUID, query: str) -> str:
+    digest = hashlib.sha256(f"{tenant_id}{query}".encode()).hexdigest()
+    return f"cache:query:{tenant_id}:{digest}"
 
 
 def _to_lc_messages(messages: list[ChatMessage]) -> list[BaseMessage]:
@@ -66,6 +74,23 @@ async def send_message(
         db, thread.id, tenant.tenant_id, role="user", content=query
     )
 
+    # Cache lookup
+    key = _cache_key(tenant.tenant_id, query)
+    cached = await cache_get(key)
+    if cached is not None:
+        answer = cached["answer"]
+        sources = cached["sources"]
+        await chat_message_repo.create(
+            db, thread.id, tenant.tenant_id, role="agent", content=answer, sources=sources,
+        )
+        await chat_thread_repo.touch(db, thread)
+        await db.commit()
+        return ChatMessageResponse(
+            message_agent=answer,
+            id_thread=thread.id,
+            sources=[Source(**s) for s in sources],
+        )
+
     history = await chat_message_repo.list_by_thread(
         db, thread.id, tenant.tenant_id, limit=HISTORY_LIMIT
     )
@@ -85,6 +110,9 @@ async def send_message(
 
     answer = final_state.get("answer", "")
     sources = final_state.get("sources", [])
+
+    # Populate cache
+    await cache_set(key, {"answer": answer, "sources": sources})
 
     await chat_message_repo.create(
         db,
@@ -118,6 +146,21 @@ async def send_message_stream(
         db, thread.id, tenant.tenant_id, role="user", content=query
     )
 
+    # Cache hit — return complete answer as single SSE event
+    key = _cache_key(tenant.tenant_id, query)
+    cached = await cache_get(key)
+    if cached is not None:
+        answer = cached["answer"]
+        sources = cached["sources"]
+        await chat_message_repo.create(
+            db, thread.id, tenant.tenant_id, role="agent", content=answer, sources=sources,
+        )
+        await chat_thread_repo.touch(db, thread)
+        await db.commit()
+        yield f"data: {json.dumps({'chunk': answer})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'id_thread': str(thread.id), 'sources': sources})}\n\n"
+        return
+
     history = await chat_message_repo.list_by_thread(
         db, thread.id, tenant.tenant_id, limit=HISTORY_LIMIT
     )
@@ -144,11 +187,16 @@ async def send_message_stream(
             text = chunk.content if isinstance(chunk.content, str) else ""
             if text:
                 accumulated += text
-                yield text
+                yield f"data: {json.dumps({'chunk': text})}\n\n"
         elif mode == "updates":
             for node_update in payload.values():
                 if "sources" in node_update and node_update["sources"]:
                     final_sources = node_update["sources"]
+
+    # Populate cache
+    await cache_set(key, {"answer": accumulated, "sources": final_sources})
+
+    yield f"data: {json.dumps({'done': True, 'id_thread': str(thread.id), 'sources': final_sources})}\n\n"
 
     await chat_message_repo.create(
         db,

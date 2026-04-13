@@ -16,6 +16,8 @@ class Tenant(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    webhook_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     api_keys = relationship("ApiKey", back_populates="tenant")
     projects = relationship("Project", back_populates="tenant")

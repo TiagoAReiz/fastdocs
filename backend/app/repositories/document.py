@@ -20,9 +20,12 @@ async def list_by_tenant(
     page_size: int,
     search: str | None = None,
     status: str | None = None,
+    project_id: UUID | None = None,
 ) -> tuple[list[Document], int]:
     base = select(Document).where(Document.id_tenant == tenant_id, Document.deleted_at.is_(None))
 
+    if project_id:
+        base = base.where(Document.id_project == project_id)
     if search:
         base = base.where(Document.name.ilike(f"%{search}%"))
     if status:

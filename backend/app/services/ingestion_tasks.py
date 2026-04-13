@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.clients.llm_client import generate_embeddings_batched
+from app.clients.redis_client import cache_invalidate_tenant
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.storage import get_container_client
@@ -12,8 +13,9 @@ from app.repositories import (
     document as document_repo,
     document_embedding as embedding_repo,
     document_metadata as document_metadata_repo,
+    tenant as tenant_repo,
 )
-from app.services.extraction import chunker, registry
+from app.services.extraction import chunker, cleaner, registry
 from app.services.extraction.base import Chunk
 
 log = logging.getLogger(__name__)
@@ -72,7 +74,8 @@ async def _process_document_async(
             content = _download_blob(doc.storage_path)
 
             result = registry.extract(doc.type, content)
-            chunks: list[Chunk] = chunker.chunk(result.sections)
+            cleaned_sections = cleaner.clean_sections(result.sections)
+            chunks: list[Chunk] = chunker.chunk(cleaned_sections)
 
             if not chunks:
                 doc.status = "error"
@@ -119,9 +122,14 @@ async def _process_document_async(
 
             doc.status = "done"
             doc.extraction_method = result.extraction_method
+            doc.extraction_notes = result.extraction_notes or None
             doc.error_msg = None
             await db.flush()
             await db.commit()
+
+            await cache_invalidate_tenant(id_tenant)
+            await _dispatch_webhook(session_factory, id_tenant, id_document, "done")
+
             return {"status": "done", "chunks": len(chunks)}
 
         except Exception as exc:  # noqa: BLE001
@@ -136,6 +144,37 @@ async def _process_document_async(
                     await recovery_db.flush()
                     await recovery_db.commit()
             raise
+
+
+async def _dispatch_webhook(
+    session_factory: async_sessionmaker[AsyncSession],
+    id_tenant: UUID,
+    id_document: UUID,
+    doc_status: str,
+    error: str | None = None,
+) -> None:
+    from datetime import datetime, timezone
+
+    async with session_factory() as db:
+        tenant = await tenant_repo.get_by_id(db, id_tenant)
+    if tenant is None or not tenant.webhook_url:
+        return
+
+    payload = {
+        "event": "document.processed",
+        "document_id": str(id_document),
+        "status": doc_status,
+        "error": error,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    celery_app.send_task(
+        "app.services.webhook_tasks.send_webhook",
+        kwargs={
+            "webhook_url": tenant.webhook_url,
+            "webhook_secret": tenant.webhook_secret,
+            "payload": payload,
+        },
+    )
 
 
 def _download_blob(storage_path: str) -> bytes:

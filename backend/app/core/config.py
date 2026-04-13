@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     OCR_DPI: int = 300
     SCANNED_PDF_CHAR_THRESHOLD: int = 100
 
+    # Rate limiting
+    RATE_LIMIT_INGEST: int = 50
+    RATE_LIMIT_INGEST_WINDOW: int = 60
+    RATE_LIMIT_QUERY: int = 200
+    RATE_LIMIT_QUERY_WINDOW: int = 60
+
     # Outbox relay
     OUTBOX_RELAY_POLL_TIMEOUT: int = 20
     OUTBOX_RELAY_BATCH_SIZE: int = 50

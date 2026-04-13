@@ -27,3 +27,8 @@ class RagState(TypedDict, total=False):
     # Generation
     answer: str
     sources: list[dict[str, Any]]
+
+    # Agent control flow
+    retry_count: int
+    reformulated_query: str
+    query_intent: str
