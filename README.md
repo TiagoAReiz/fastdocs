@@ -357,7 +357,6 @@ fastdocs/
 - [ ] Embedding model decision (currently Gemini API — planned: local model)
 - [ ] Structured logging with request correlation IDs
 - [ ] CI/CD with GitHub Actions
-- [ ] `.env.example` template file
 - [ ] Observability (metrics endpoint, Prometheus)
 
 ---
