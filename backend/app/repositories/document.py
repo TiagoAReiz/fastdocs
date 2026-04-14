@@ -2,13 +2,16 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.document import Document
 
 
 async def get_by_id(db: AsyncSession, id: UUID, tenant_id: UUID) -> Document | None:
     result = await db.execute(
-        select(Document).where(Document.id == id, Document.id_tenant == tenant_id, Document.deleted_at.is_(None))
+        select(Document)
+        .options(selectinload(Document.metadata_rel))
+        .where(Document.id == id, Document.id_tenant == tenant_id, Document.deleted_at.is_(None))
     )
     return result.scalar_one_or_none()
 

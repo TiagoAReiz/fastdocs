@@ -147,7 +147,7 @@ cp backend/.env.example backend/.env
 docker compose up --build
 ```
 
-This starts **6 services**: FastAPI backend, Celery worker, Outbox relay, PostgreSQL (pgvector), Redis, and Azurite.
+This starts **7 services**: FastAPI backend, Celery worker, Celery beat, Outbox relay, PostgreSQL (pgvector), Redis, and Azurite.
 
 ### 3. Verify
 
@@ -237,7 +237,7 @@ curl http://localhost:8000/api/chat/history \
 
 ```
 fastdocs/
-├── docker-compose.yml          # All 6 services
+├── docker-compose.yml          # All 7 services
 ├── azurite.Dockerfile          # Azure Blob emulator setup
 │
 └── backend/
@@ -332,21 +332,33 @@ fastdocs/
 
 ## 🗺️ Roadmap
 
-- [x] Multi-tenant auth with API Keys
-- [x] Document ingestion pipeline (8 formats)
-- [x] Outbox Pattern with LISTEN/NOTIFY
-- [x] LangGraph RAG agent
-- [x] Chat with threaded history
-- [x] Docker Compose (6 services)
-- [x] Alembic migrations
-- [x] SSE streaming responses
-- [x] Scanned PDF OCR (Tesseract)
-- [ ] Admin endpoints (tenant/key management)
-- [ ] Rate limiting middleware
-- [ ] Query cache with Redis
-- [ ] Webhook callbacks
-- [ ] Test suite (pytest)
+### Done
+
+- [x] Multi-tenant auth with API Keys (SHA-256 hashing, tenant isolation)
+- [x] Document ingestion pipeline (PDF, DOCX, XLSX, CSV, TXT, MD, PPTX, images)
+- [x] Scanned PDF auto-detection + Tesseract OCR (confidence filtering, language support)
+- [x] Outbox Pattern with Postgres LISTEN/NOTIFY + fallback polling
+- [x] LangGraph RAG agent (6 nodes: analyze, retrieve, evaluate, rerank, reformulate, generate)
+- [x] Chat with threaded history and persistent state (LangGraph checkpointer)
+- [x] SSE streaming responses (`stream=true`)
+- [x] Rate limiting middleware (sliding window, Redis sorted sets, per-tenant/per-endpoint)
+- [x] Query cache with Redis (TTL 30min, auto-invalidation on new document ingestion)
+- [x] Webhook callbacks (HMAC-SHA256 signature, 3 retries with exponential backoff)
+- [x] Celery Beat recovery (detects stuck documents in `processing` > 10min)
+- [x] Docker Compose (7 services: API, worker, beat, relay, Postgres, Redis, Azurite)
+- [x] Alembic migrations (initial schema + webhook fields)
+- [x] Text cleaning pipeline (encoding normalization, dedup, header/footer filtering)
+- [x] Document reprocessing endpoint (`POST /documents/{id}/reprocess`)
+
+### To Do
+
+- [ ] Admin API for tenant/key CRUD (currently requires direct DB access)
+- [ ] Embedding model decision (currently Gemini API — planned: local model)
+- [ ] Test suite (pytest) — test files exist but are stubs
+- [ ] Structured logging with request correlation IDs
 - [ ] CI/CD with GitHub Actions
+- [ ] `.env.example` template file
+- [ ] Observability (metrics endpoint, Prometheus)
 
 ---
 

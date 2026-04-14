@@ -26,7 +26,7 @@ async def get_current_tenant(
 
 
 def get_checkpointer(request: Request):
-    return request.app.state.checkpointer
+    return request.app.state.checkpointer.saver
 
 
 def _rate_limiter(endpoint_tag: str, limit: int, window: int) -> Callable:
