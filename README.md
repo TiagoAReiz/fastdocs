@@ -349,12 +349,12 @@ fastdocs/
 - [x] Alembic migrations (initial schema + webhook fields)
 - [x] Text cleaning pipeline (encoding normalization, dedup, header/footer filtering)
 - [x] Document reprocessing endpoint (`POST /documents/{id}/reprocess`)
+- [x] Test suite (pytest) 
 
 ### To Do
 
 - [ ] Admin API for tenant/key CRUD (currently requires direct DB access)
 - [ ] Embedding model decision (currently Gemini API — planned: local model)
-- [ ] Test suite (pytest) — test files exist but are stubs
 - [ ] Structured logging with request correlation IDs
 - [ ] CI/CD with GitHub Actions
 - [ ] `.env.example` template file
