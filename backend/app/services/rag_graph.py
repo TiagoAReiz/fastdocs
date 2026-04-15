@@ -7,7 +7,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.llm_client import generate_embeddings
+from app.clients.llm_client import generate_query_embedding
 from app.core.graph.state import RagState
 from app.core.llm import llm
 from app.models.document_embedding import DocumentEmbedding
@@ -169,10 +169,10 @@ def build_rag_graph(db: AsyncSession, checkpointer: BaseCheckpointSaver):
     # ------------------------------------------------------------------
     async def retrieve(state: RagState) -> dict[str, Any]:
         query = state.get("reformulated_query") or state["query"]
-        embeddings = await generate_embeddings([query])
+        embedding = await generate_query_embedding(query)
         scored = await embedding_repo.similarity_search(
             db,
-            embedding=embeddings[0],
+            embedding=embedding,
             project_id=state["id_project"],
             tenant_id=state["id_tenant"],
             limit=RETRIEVAL_LIMIT,

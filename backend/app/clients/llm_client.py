@@ -38,16 +38,17 @@ async def send_message_stream(
             yield chunk.content
 
 
-def _make_embeddings_model() -> GoogleGenerativeAIEmbeddings:
+def _make_embeddings_model(task_type: str) -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(
         model=settings.EMBEDDING_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
         output_dimensionality=settings.EMBEDDING_DIM,
+        task_type=task_type,
     )
 
 
-async def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    return await _make_embeddings_model().aembed_documents(texts)
+async def generate_query_embedding(text: str) -> list[float]:
+    return await _make_embeddings_model("RETRIEVAL_QUERY").aembed_query(text)
 
 
 async def generate_embeddings_batched(
@@ -55,7 +56,7 @@ async def generate_embeddings_batched(
 ) -> list[list[float]]:
     """Embed texts in chunks of `batch_size` to stay within API rate/size limits."""
     size = batch_size or settings.EMBEDDING_BATCH_SIZE
-    model = _make_embeddings_model()
+    model = _make_embeddings_model("RETRIEVAL_DOCUMENT")
     out: list[list[float]] = []
     for i in range(0, len(texts), size):
         batch = texts[i : i + size]
