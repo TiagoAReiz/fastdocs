@@ -9,10 +9,12 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.redis_client import cache_get, cache_set
+from app.core.crypto import decrypt
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.repositories import chat_message as chat_message_repo
 from app.repositories import chat_thread as chat_thread_repo
+from app.repositories import tenant as tenant_repo
 from app.schemas.chat import (
     ChatMessageResponse,
     MessageItem,
@@ -60,6 +62,18 @@ async def _get_or_create_thread(
     return thread
 
 
+async def _resolve_gemini_key(db: AsyncSession, tenant: TenantContext) -> str:
+    if tenant.gemini_api_key:
+        return tenant.gemini_api_key
+    tenant_row = await tenant_repo.get_by_id(db, tenant.tenant_id)
+    if tenant_row is None or not tenant_row.gemini_api_key_encrypted:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tenant has no Gemini API key configured",
+        )
+    return decrypt(tenant_row.gemini_api_key_encrypted)
+
+
 async def send_message(
     db: AsyncSession,
     tenant: TenantContext,
@@ -68,6 +82,7 @@ async def send_message(
     checkpointer: BaseCheckpointSaver,
     id_thread: UUID | None = None,
 ) -> ChatMessageResponse:
+    gemini_key = await _resolve_gemini_key(db, tenant)
     thread = await _get_or_create_thread(db, tenant, id_project, id_thread, query)
 
     await chat_message_repo.create(
@@ -96,7 +111,7 @@ async def send_message(
     )
     lc_history = _to_lc_messages(history)
 
-    graph = build_rag_graph(db, checkpointer)
+    graph = build_rag_graph(db, checkpointer, gemini_key)
     final_state = await graph.ainvoke(
         {
             "id_tenant": tenant.tenant_id,
@@ -140,6 +155,7 @@ async def send_message_stream(
     checkpointer: BaseCheckpointSaver,
     id_thread: UUID | None = None,
 ) -> AsyncIterator[str]:
+    gemini_key = await _resolve_gemini_key(db, tenant)
     thread = await _get_or_create_thread(db, tenant, id_project, id_thread, query)
 
     await chat_message_repo.create(
@@ -166,7 +182,7 @@ async def send_message_stream(
     )
     lc_history = _to_lc_messages(history)
 
-    graph = build_rag_graph(db, checkpointer)
+    graph = build_rag_graph(db, checkpointer, gemini_key)
 
     accumulated = ""
     final_sources: list[dict] = []

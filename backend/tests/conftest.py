@@ -1,13 +1,20 @@
 import hashlib
+import os
 import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+
+# Set admin/crypto env vars before app modules are first imported
+os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
+os.environ.setdefault("SERVICE_API_KEY", "test-service-key")
+os.environ.setdefault("ADMIN_ALLOWED_IPS", '["127.0.0.1"]')
 
 from app.core.config import settings
 from app.core.database import Base, get_db
@@ -59,9 +66,14 @@ async def db():
 # Commit data so the client (which uses a separate session) can see it.
 
 
+def _encrypted_dummy_key() -> str:
+    from app.core.crypto import encrypt
+    return encrypt("AIzaDummyKeyForTests")
+
+
 @pytest_asyncio.fixture
 async def tenant(db: AsyncSession):
-    t = Tenant(name=f"test-tenant-{uuid.uuid4().hex[:8]}")
+    t = Tenant(name=f"test-tenant-{uuid.uuid4().hex[:8]}", gemini_api_key_encrypted=_encrypted_dummy_key())
     db.add(t)
     await db.commit()
     return t
@@ -69,7 +81,7 @@ async def tenant(db: AsyncSession):
 
 @pytest_asyncio.fixture
 async def second_tenant(db: AsyncSession):
-    t = Tenant(name=f"test-tenant-b-{uuid.uuid4().hex[:8]}")
+    t = Tenant(name=f"test-tenant-b-{uuid.uuid4().hex[:8]}", gemini_api_key_encrypted=_encrypted_dummy_key())
     db.add(t)
     await db.commit()
     return t
@@ -100,6 +112,14 @@ async def second_api_key_plain(db: AsyncSession, second_tenant: Tenant):
 def auth_headers(api_key_plain) -> dict[str, str]:
     plain, _ = api_key_plain
     return {"X-API-Key": plain}
+
+
+@pytest.fixture
+def admin_headers() -> dict[str, str]:
+    return {
+        "X-Service-Key": settings.SERVICE_API_KEY,
+        "X-Forwarded-For": "127.0.0.1",
+    }
 
 
 @pytest_asyncio.fixture

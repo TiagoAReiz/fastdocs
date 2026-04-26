@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.llm_client import generate_query_embedding
 from app.core.graph.state import RagState
-from app.core.llm import llm
+from app.core.llm import build_chat_llm
 from app.models.document_embedding import DocumentEmbedding
 from app.repositories import document_embedding as embedding_repo
 
@@ -134,15 +134,16 @@ def _route_after_evaluation(state: RagState) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_rag_graph(db: AsyncSession, checkpointer: BaseCheckpointSaver):
+def build_rag_graph(db: AsyncSession, checkpointer: BaseCheckpointSaver, gemini_api_key: str):
     """Builds and compiles the 6-node RAG agent graph.
 
     Nodes: analyze_query → retrieve → evaluate_context → rerank → generate
     With a conditional retry loop: evaluate_context → reformulate → retrieve
 
-    The db session is injected via closure because LangGraph nodes only receive
-    the graph state — we don't want to serialize a session into the state.
+    The db session and gemini_api_key are injected via closure because LangGraph
+    nodes only receive the graph state.
     """
+    llm = build_chat_llm(gemini_api_key)
 
     # ------------------------------------------------------------------
     # Node 1: analyze_query
@@ -169,7 +170,7 @@ def build_rag_graph(db: AsyncSession, checkpointer: BaseCheckpointSaver):
     # ------------------------------------------------------------------
     async def retrieve(state: RagState) -> dict[str, Any]:
         query = state.get("reformulated_query") or state["query"]
-        embedding = await generate_query_embedding(query)
+        embedding = await generate_query_embedding(query, gemini_api_key)
         scored = await embedding_repo.similarity_search(
             db,
             embedding=embedding,

@@ -55,6 +55,20 @@ async def _process_document_async(
     session_factory = _new_session_factory()
 
     async with session_factory() as db:
+        tenant = await tenant_repo.get_by_id(db, id_tenant)
+        if tenant is None or not tenant.gemini_api_key_encrypted:
+            log.error("process_document: tenant %s has no Gemini API key configured", id_tenant)
+            async with session_factory() as err_db:
+                doc_err = await document_repo.get_by_id(err_db, id_document, id_tenant)
+                if doc_err:
+                    doc_err.status = "error"
+                    doc_err.error_msg = "Tenant has no Gemini API key configured"
+                    await err_db.commit()
+            return {"status": "error", "reason": "no_gemini_key"}
+
+        from app.core.crypto import decrypt
+        gemini_api_key = decrypt(tenant.gemini_api_key_encrypted)
+
         doc = await document_repo.get_by_id(db, id_document, id_tenant)
         if doc is None:
             log.warning("process_document: document %s not found", id_document)
@@ -86,7 +100,7 @@ async def _process_document_async(
                 return {"status": "error", "reason": "empty"}
 
             texts = [c.text for c in chunks]
-            vectors = await generate_embeddings_batched(texts)
+            vectors = await generate_embeddings_batched(texts, gemini_api_key)
             if len(vectors) != len(chunks):
                 raise RuntimeError(
                     f"embedding count mismatch: {len(vectors)} vs {len(chunks)} chunks"

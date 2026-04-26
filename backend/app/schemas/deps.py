@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import Query
@@ -8,6 +8,7 @@ from fastapi import Query
 class TenantContext:
     tenant_id: UUID
     api_key_id: UUID
+    gemini_api_key: str | None = field(default=None)
 
 
 @dataclass

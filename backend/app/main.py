@@ -10,7 +10,7 @@ from app.core.database import async_session
 from app.core.graph import CheckpointerManager
 from app.core.redis import redis_client
 from app.core.storage import get_container_client
-from app.routers import chat, documents, projects
+from app.routers import admin, chat, documents, projects
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.add_middleware(
 )
 
 
+app.include_router(admin.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(projects.router)

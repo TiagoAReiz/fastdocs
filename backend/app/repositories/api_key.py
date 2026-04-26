@@ -13,8 +13,27 @@ async def get_by_hash(db: AsyncSession, hash_key: str) -> ApiKey | None:
     return result.scalar_one_or_none()
 
 
+async def get_by_id(db: AsyncSession, id: UUID) -> ApiKey | None:
+    result = await db.execute(select(ApiKey).where(ApiKey.id == id))
+    return result.scalar_one_or_none()
+
+
 async def create(db: AsyncSession, id_tenant: UUID, hash_key: str, label: str | None = None) -> ApiKey:
     api_key = ApiKey(id_tenant=id_tenant, hash_key=hash_key, label=label)
     db.add(api_key)
     await db.flush()
     return api_key
+
+
+async def list_by_tenant(db: AsyncSession, id_tenant: UUID) -> list[ApiKey]:
+    result = await db.execute(
+        select(ApiKey)
+        .where(ApiKey.id_tenant == id_tenant)
+        .order_by(ApiKey.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def revoke(db: AsyncSession, api_key: ApiKey) -> None:
+    api_key.is_active = False
+    await db.flush()

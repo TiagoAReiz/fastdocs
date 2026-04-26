@@ -34,5 +34,8 @@ python-pptx>=1.0.0
 # Azure Blob Storage
 azure-storage-blob>=12.24.0
 
+# Encryption
+cryptography>=42.0.0
+
 # pgvector
 pgvector>=0.3.0

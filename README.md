@@ -11,7 +11,7 @@
 
 > **Multi-tenant RAG microservice** — ingere documentos, indexa como embeddings vetoriais e responde perguntas em linguagem natural, tudo por trás de uma simples API Key.
 
-FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para ser consumido por outras aplicações. Cada consumidor (tenant) possui coleções de documentos, threads de chat e contexto de queries isolados, acessíveis através do header `X-API-Key`.
+FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para ser consumido por outras aplicações. Cada consumidor (tenant) possui coleções de documentos, threads de chat e contexto de queries isolados, acessíveis através do header `X-API-Key`. Tenants e API Keys são provisionados via API administrativa protegida, e cada tenant traz a própria chave Gemini — o custo de LLM fica isolado por cliente.
 
 ---
 
@@ -19,7 +19,10 @@ FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para s
 
 | Feature | Descrição |
 |---------|-----------|
-| **Multi-tenant** | Auth por API Key com hash SHA-256. Tenants nunca acessam dados uns dos outros |
+| **Admin API** | Endpoints `/admin/*` para CRUD de tenants, emissão e revogação de API Keys |
+| **Auth em camada dupla** | Rotas admin protegidas por `X-Service-Key` + IP allowlist; rotas tenant por `X-API-Key` SHA-256 |
+| **Gemini key por tenant** | Cada tenant cadastra a própria chave Gemini (criptografada com Fernet); custo isolado |
+| **Multi-tenant** | Isolamento total: toda query inclui `WHERE tenant_id = ?` na camada de repositório |
 | **Multi-formato** | PDF, DOCX, XLSX, CSV, TXT, MD, PPTX e imagens |
 | **OCR** | Auto-detecção de PDFs escaneados com roteamento para Tesseract |
 | **LangGraph RAG** | Agente com 6 nós: análise, recuperação, avaliação, reranking, reformulação e geração |
@@ -38,12 +41,17 @@ FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para s
 
 ```mermaid
 flowchart TB
+    subgraph AdminCaller["Backend Administrativo"]
+        AA[Serviço interno]
+    end
+
     subgraph Client
         A[Consumer Service]
     end
 
     subgraph API["FastAPI (async)"]
-        B[Auth Middleware\nX-API-Key → tenant_id]
+        ADM[Admin Router\nX-Service-Key + IP]
+        B[Auth Middleware\nX-API-Key → tenant_id + gemini_key]
         C[Chat Router]
         D[Documents Router]
         E[Projects Router]
@@ -62,10 +70,12 @@ flowchart TB
     end
 
     subgraph AI
-        L[Gemini Flash\nChat LLM]
+        L[Gemini Flash\nChat LLM — por tenant]
         M[LangGraph Agent\nRAG com retry]
     end
 
+    AA -->|X-Service-Key| ADM
+    ADM -->|CRUD tenants + keys| I
     A -->|X-API-Key| B
     B --> C & D & E
     D -->|Upload 202| K
@@ -74,11 +84,22 @@ flowchart TB
     F -->|Publish task| J
     J -->|Consume| G
     G --> H
-    H -->|Embeddings| I
+    H -->|Embeddings — key do tenant| I
     C --> M
     M -->|Similarity search| I
-    M -->|Generate| L
+    M -->|Generate — key do tenant| L
     J -.->|Cache| C
+```
+
+### Fluxo de Provisionamento (Admin)
+
+```
+POST /admin/tenants
+  Body: { name, gemini_api_key, webhook_url? }
+  → Valida a gemini_api_key contra a API do Google
+  → Criptografa a key com Fernet e grava no banco
+  → Emite a primeira API Key para o tenant
+  → Retorna { id, name, api_key: "fdocs_..." }   ← plaintext exibido uma única vez
 ```
 
 ### Fluxo de Ingestão
@@ -88,6 +109,7 @@ Upload → 202 Accepted
   → Outbox Event (atômico com o INSERT do documento)
   → Relay publica no Redis via LISTEN/NOTIFY
   → Celery Worker consome a task
+  → Carrega gemini_key do tenant e descriptografa
   → Download do Blob → Parse → Clean → Chunk → Embed → pgvector
   → Webhook callback (se configurado)
 ```
@@ -96,9 +118,9 @@ Upload → 202 Accepted
 
 ```
 POST /api/chat/message
-  → Auth → tenant_id injetado
+  → Auth → tenant_id + gemini_key injetados
   → Cache lookup (Redis)
-  → LangGraph Agent:
+  → LangGraph Agent (usa gemini_key do tenant):
       analyze_query → retrieve (pgvector) → evaluate_context
         ├─ suficiente? → rerank → generate (Gemini Flash) → response
         └─ insuficiente? → reformulate → retrieve novamente (máx 2 tentativas)
@@ -119,7 +141,8 @@ O Celery Beat executa `recover_stuck_documents` a cada 60 segundos. Documentos e
 | **ORM** | SQLAlchemy 2.0 + Alembic | Queries async type-safe, migrations versionadas |
 | **Vetores** | pgvector (PostgreSQL 16) | Sem DB extra — relacional + vetorial em uma query |
 | **RAG** | LangChain + LangGraph | Orquestração de pipeline + agente com estado |
-| **LLM + Embeddings** | Gemini Flash + gemini-embedding-001 | Qualidade sólida, uma única integração |
+| **LLM + Embeddings** | Gemini Flash + gemini-embedding-001 | Key por tenant — custo isolado |
+| **Cripto** | Fernet (cryptography) | Criptografia reversível das chaves Gemini no banco |
 | **Tasks** | Celery + Redis | Processamento em background com retry e scheduler |
 | **Storage** | Azure Blob (Azurite local) | Pronto para Azure, paridade local com Azurite |
 | **OCR** | Tesseract | Open source, local, sem custo de API |
@@ -132,7 +155,7 @@ O Celery Beat executa `recover_stuck_documents` a cada 60 segundos. Documentos e
 ### Pré-requisitos
 
 - [Docker](https://docs.docker.com/get-docker/) e Docker Compose
-- Uma [Google AI API Key](https://aistudio.google.com/apikey) (Gemini)
+- Uma [Google AI API Key](https://aistudio.google.com/apikey) (Gemini) — agora por tenant
 
 ### 1. Clonar e configurar
 
@@ -141,10 +164,19 @@ git clone https://github.com/TiagoAReiz/fastdocs.git
 cd fastdocs
 
 cp backend/.env.example backend/.env
-# Edite backend/.env e preencha GOOGLE_API_KEY
 ```
 
-> A connection string do Azurite já tem o valor padrão preenchido no `.env.example` — não precisa alterar para desenvolvimento local.
+Edite `backend/.env` e preencha as variáveis obrigatórias:
+
+```bash
+# Gerar SERVICE_API_KEY
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# Gerar ENCRYPTION_KEY
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+> A connection string do Azurite já tem o valor padrão preenchido — não precisa alterar para desenvolvimento local.
 
 ### 2. Subir todos os serviços
 
@@ -170,9 +202,52 @@ open http://localhost:8000/docs
 
 ## Referência da API
 
-Todos os endpoints exigem o header `X-API-Key`.
+### Admin (provisionamento de tenants)
 
-> Tenants e API Keys são criados diretamente no banco de dados (sem endpoint admin).
+Todos os endpoints `/admin/*` exigem `X-Service-Key` e devem ser chamados de um IP cadastrado em `ADMIN_ALLOWED_IPS`.
+
+```bash
+# Criar tenant + emitir primeira API Key (key aparece uma única vez)
+curl -X POST http://localhost:8000/admin/tenants \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "acme",
+    "gemini_api_key": "AIza...",
+    "webhook_url": "https://acme.com/webhook"
+  }'
+# → { "id": "...", "name": "acme", "api_key": "fdocs_..." }
+
+# Listar tenants
+curl http://localhost:8000/admin/tenants \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP"
+
+# Emitir nova API Key para um tenant
+curl -X POST http://localhost:8000/admin/tenants/<tenant-uuid>/api-keys \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "producao"}'
+
+# Revogar API Key
+curl -X DELETE http://localhost:8000/admin/api-keys/<key-uuid> \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP"
+
+# Rotacionar chave Gemini de um tenant
+curl -X PATCH http://localhost:8000/admin/tenants/<tenant-uuid> \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP" \
+  -H "Content-Type: application/json" \
+  -d '{"gemini_api_key": "AIzaNova..."}'
+
+# Deletar tenant (soft delete)
+curl -X DELETE http://localhost:8000/admin/tenants/<tenant-uuid> \
+  -H "X-Service-Key: $SERVICE_API_KEY" \
+  -H "X-Forwarded-For: $MEU_IP"
+```
 
 ### Projects
 
@@ -275,7 +350,9 @@ Crie `backend/.env` a partir de `backend/.env.example`:
 
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
-| `GOOGLE_API_KEY` | — | **Obrigatória.** Chave da API Gemini |
+| `SERVICE_API_KEY` | — | **Obrigatória.** Chave do caller admin (server-to-server) |
+| `ENCRYPTION_KEY` | — | **Obrigatória.** Fernet key para criptografar chaves Gemini no banco |
+| `ADMIN_ALLOWED_IPS` | — | **Obrigatória.** Lista JSON de IPs autorizados a chamar `/admin/*` |
 | `DATABASE_URL` | `postgresql+asyncpg://fastdocs:fastdocs@postgres:5432/fastdocs` | URL do Postgres |
 | `REDIS_URL` | `redis://redis:6379/0` | URL do Redis |
 | `AZURE_STORAGE_CONNECTION_STRING` | string Azurite padrão | Connection string do Blob Storage |
@@ -305,8 +382,9 @@ fastdocs/
     │
     ├── alembic/
     │   └── versions/
-    │       ├── 0001_initial_schema.py   # Schema completo + trigger NOTIFY
-    │       └── 0002_tenant_webhook_fields.py
+    │       ├── 0001_initial_schema.py          # Schema completo + trigger NOTIFY
+    │       ├── 0002_tenant_webhook_fields.py
+    │       └── 0003_tenant_gemini_key.py       # gemini_api_key_encrypted
     │
     └── app/
         ├── main.py                     # FastAPI app + lifespan
@@ -317,20 +395,23 @@ fastdocs/
         │   ├── celery_app.py           # Celery + beat_schedule
         │   ├── redis.py                # Conexão Redis
         │   ├── storage.py              # Inicialização Azure Blob
-        │   ├── llm.py                  # Cliente Gemini
+        │   ├── llm.py                  # Factory build_chat_llm(api_key)
+        │   ├── crypto.py               # Fernet encrypt/decrypt
         │   └── graph/
         │       ├── state.py            # RagState (TypedDict)
         │       └── checkpointer.py     # AsyncRedisSaver lifecycle
         │
         ├── models/                     # SQLAlchemy ORM
         ├── schemas/                    # Pydantic DTOs
+        │   └── admin.py                # DTOs do admin (TenantCreate, ApiKeyResponse…)
         ├── repositories/               # Data access (scoped por tenant_id)
         │
         ├── services/
+        │   ├── admin_service.py        # CRUD tenants + emissão/revogação de keys
         │   ├── chat_service.py         # Thread, cache, histórico
         │   ├── document_service.py     # Upload, soft delete, reprocessing
         │   ├── project_service.py
-        │   ├── rag_graph.py            # LangGraph (6 nós)
+        │   ├── rag_graph.py            # LangGraph (6 nós) — recebe gemini_api_key
         │   ├── ingestion_tasks.py      # Celery task principal
         │   ├── beat_tasks.py           # recover_stuck_documents
         │   ├── webhook_tasks.py        # Callbacks com HMAC-SHA256
@@ -344,14 +425,15 @@ fastdocs/
         │       └── tabular.py
         │
         ├── routers/
-        │   ├── deps.py                 # Auth + rate limiting
+        │   ├── deps.py                 # Auth tenant + require_admin
+        │   ├── admin.py                # /admin/* endpoints
         │   ├── chat.py
         │   ├── documents.py
         │   └── projects.py
         │
         └── clients/
             ├── blob_client.py
-            ├── llm_client.py           # Embeddings batched + chat
+            ├── llm_client.py           # Embeddings batched + chat (api_key explícito)
             └── redis_client.py         # Cache + rate limit
 ```
 
@@ -361,6 +443,9 @@ fastdocs/
 
 | Decisão | Alternativa Considerada | Motivação |
 |----------|----------------------|-----------|
+| **Gemini key por tenant** | Key global no `.env` | Isola custo por cliente; chave faturada para o tenant não para o serviço |
+| **Fernet** para criptografia das keys | KMS (Vault/AWS) | Suficiente para MVP; master key no `.env`; KMS é upgrade natural |
+| **IP allowlist + service key** para admin | OAuth / JWT | Caller é server-to-server conhecido; dupla camada sem infra extra |
 | **pgvector** no Postgres | Qdrant, Chroma, Pinecone | Sem serviço extra; joins relacionais + vetoriais em uma query |
 | **Outbox Pattern** com LISTEN/NOTIFY | Publish direto no Redis | Elimina dual-write SPOF; eventos nunca são perdidos |
 | **Celery** para tasks | FastAPI BackgroundTasks | Tasks sobrevivem restarts; retry e monitoring nativos |
@@ -368,13 +453,14 @@ fastdocs/
 | **Azure Blob** (Azurite local) | MinIO / S3 | Deploy alvo é Azure; Azurite oferece paridade local |
 | **Cache exato** de queries | Cache semântico | Mais simples; evita falsos positivos em v1 |
 | **Sliding window** rate limiting | Token bucket | Mais preciso; granularidade por tenant com Redis sorted sets |
-| **Gemini** para embeddings | Modelo local (HuggingFace) | Integração única, sem overhead de infraestrutura para modelo local |
 
 ---
 
 ## Segurança
 
-- **API Keys**: apenas o hash SHA-256 é armazenado — o plaintext é exibido uma única vez na criação
+- **Admin**: dupla camada — `X-Service-Key` (constant-time compare) + IP allowlist. Ambas obrigatórias
+- **API Keys de tenant**: apenas o hash SHA-256 é armazenado — plaintext exibido uma única vez na criação
+- **Chaves Gemini**: armazenadas criptografadas com Fernet; descriptografadas em memória apenas durante a request/task
 - **Isolamento de tenant**: toda query inclui `WHERE tenant_id = ?` — aplicado na camada de repositório
 - **Webhook signing**: header `X-FastDocs-Signature: sha256=<hmac>` para verificação de callbacks
 - **Sem segredos no repo**: `.env` está no `.gitignore`; `.env.example` fornece o template
@@ -383,6 +469,9 @@ fastdocs/
 
 ## O que está implementado
 
+- [x] **Admin API** — CRUD de tenants, emissão/revogação de API Keys, rotação de chave Gemini
+- [x] **Auth em camada dupla** — `X-Service-Key` + IP allowlist para admin; `X-API-Key` SHA-256 para tenants
+- [x] **Gemini key por tenant** — criptografada com Fernet, validada contra a API do Google no cadastro
 - [x] Auth multi-tenant com API Keys (hash SHA-256, isolamento por tenant)
 - [x] Pipeline de ingestão (PDF, DOCX, XLSX, CSV, TXT, MD, PPTX, imagens)
 - [x] Auto-detecção de PDF escaneado + OCR Tesseract
@@ -395,19 +484,19 @@ fastdocs/
 - [x] Webhooks (assinatura HMAC-SHA256, 3 retentativas com backoff exponencial)
 - [x] Celery Beat — `recover_stuck_documents` a cada 60s
 - [x] Docker Compose (7 serviços com healthchecks e volumes persistentes)
-- [x] Migrations Alembic (schema inicial + campos de webhook)
+- [x] Migrations Alembic (schema inicial + webhook + gemini key)
 - [x] Pipeline de limpeza de texto (normalização de encoding, dedup)
 - [x] Reprocessamento de documentos (`POST /documents/{id}/reprocess`)
-- [x] Suíte de testes (pytest — 13 arquivos)
+- [x] Suíte de testes (pytest — 15 arquivos)
 
 ---
 
 ## Roadmap
 
-- [ ] Admin API para CRUD de tenants e API Keys (hoje requer acesso direto ao banco)
 - [ ] Logging estruturado com correlation IDs por request
 - [ ] CI/CD com GitHub Actions
 - [ ] Observabilidade (endpoint de métricas, Prometheus/Grafana)
+- [ ] Upgrade de criptografia: KMS (Vault / AWS KMS) em substituição ao Fernet
 
 ---
 

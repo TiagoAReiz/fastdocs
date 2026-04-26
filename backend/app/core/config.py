@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -17,8 +18,17 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONNECTION_STRING: str = "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
     AZURE_STORAGE_CONTAINER: str = "documents"
 
-    # Gemini
-    GOOGLE_API_KEY: str = ""
+    # Admin auth — service-to-service layer
+    SERVICE_API_KEY: str = ""
+    ADMIN_ALLOWED_IPS: list[str] = []
+    ENCRYPTION_KEY: str = ""  # Fernet key (urlsafe base64, 32 bytes)
+
+    @field_validator("ADMIN_ALLOWED_IPS", mode="before")
+    @classmethod
+    def _parse_ip_list(cls, v: object) -> object:
+        if isinstance(v, str) and not v.startswith("["):
+            return [ip.strip() for ip in v.split(",") if ip.strip()]
+        return v
 
     # Embedding
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"
