@@ -496,7 +496,6 @@ fastdocs/
 - [ ] Logging estruturado com correlation IDs por request
 - [ ] CI/CD com GitHub Actions
 - [ ] Observabilidade (endpoint de métricas, Prometheus/Grafana)
-- [ ] Upgrade de criptografia: KMS (Vault / AWS KMS) em substituição ao Fernet
 
 ---
 
