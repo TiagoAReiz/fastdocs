@@ -199,14 +199,20 @@ async def send_message_stream(
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":
-            chunk, _meta = payload
+            chunk, meta = payload
+            # Só transmitir os tokens do nó de geração da resposta final.
+            # Os nós analyze_query / rerank / reformulate também invocam o LLM e
+            # seus tokens (JSON de intent, scores de rerank, query reescrita)
+            # apareceriam no stream — não devem vazar para o usuário.
+            if (meta or {}).get("langgraph_node") != "generate":
+                continue
             text = chunk.content if isinstance(chunk.content, str) else ""
             if text:
                 accumulated += text
                 yield f"data: {json.dumps({'chunk': text})}\n\n"
         elif mode == "updates":
             for node_update in payload.values():
-                if "sources" in node_update and node_update["sources"]:
+                if isinstance(node_update, dict) and node_update.get("sources"):
                     final_sources = node_update["sources"]
 
     # Populate cache

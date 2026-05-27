@@ -1,0 +1,233 @@
+# FastDocs API — exemplos de requisição
+# Compatível com VS Code REST Client (extensão humao.rest-client)
+#
+# FLUXO:
+#   1. Admin cria tenant  →  recebe api_key (mostrada só uma vez)
+#   2. Use api_key como X-Api-Key em todos os endpoints /api/*
+
+@base = http://localhost:8000
+
+# ─────────────────────────────────────────────────────
+# Variáveis — preencha após cada resposta
+# ─────────────────────────────────────────────────────
+
+@service_key  = SEU_SERVICE_API_KEY        # SERVICE_API_KEY do .env
+@api_key      = API_KEY_RETORNADA          # retornada em create_tenant ou emit_api_key
+@tenant_id    = UUID_DO_TENANT
+@project_id   = UUID_DO_PROJETO
+@document_id  = UUID_DO_DOCUMENTO
+@thread_id    = UUID_DA_THREAD
+
+
+# ═════════════════════════════════════════════════════
+# ADMIN  (requer X-Service-Key + IP na allowlist)
+# ═════════════════════════════════════════════════════
+
+### Criar tenant  →  retorna api_key (só aparece aqui)
+POST {{base}}/admin/tenants
+X-Service-Key: {{service_key}}
+Content-Type: application/json
+
+{
+  "name": "Meu Tenant",
+  "gemini_api_key": "AIza...",
+  "webhook_url": null
+}
+
+###
+
+### Listar tenants
+GET {{base}}/admin/tenants?page=1&page_size=20
+X-Service-Key: {{service_key}}
+
+###
+
+### Buscar tenant por ID
+GET {{base}}/admin/tenants/{{tenant_id}}
+X-Service-Key: {{service_key}}
+
+###
+
+### Atualizar tenant
+PATCH {{base}}/admin/tenants/{{tenant_id}}
+X-Service-Key: {{service_key}}
+Content-Type: application/json
+
+{
+  "name": "Novo Nome",
+  "webhook_url": "https://meuservico.com/webhook"
+}
+
+###
+
+### Emitir nova API Key para o tenant  →  retorna api_key (só aparece aqui)
+POST {{base}}/admin/tenants/{{tenant_id}}/api-keys
+X-Service-Key: {{service_key}}
+Content-Type: application/json
+
+{
+  "label": "producao"
+}
+
+###
+
+### Listar API keys do tenant
+GET {{base}}/admin/tenants/{{tenant_id}}/api-keys
+X-Service-Key: {{service_key}}
+
+###
+
+### Revogar API key
+DELETE {{base}}/admin/api-keys/{{document_id}}
+X-Service-Key: {{service_key}}
+
+###
+
+### Deletar tenant
+DELETE {{base}}/admin/tenants/{{tenant_id}}
+X-Service-Key: {{service_key}}
+
+
+# ═════════════════════════════════════════════════════
+# PROJETOS  (requer X-Api-Key)
+# ═════════════════════════════════════════════════════
+
+### Criar projeto
+POST {{base}}/api/projects/
+X-Api-Key: {{api_key}}
+Content-Type: application/json
+
+{
+  "name": "Meu Projeto"
+}
+
+###
+
+### Listar projetos
+GET {{base}}/api/projects/?page=1&page_size=20
+X-Api-Key: {{api_key}}
+
+###
+
+### Buscar projeto por ID
+GET {{base}}/api/projects/{{project_id}}
+X-Api-Key: {{api_key}}
+
+###
+
+### Atualizar projeto
+PUT {{base}}/api/projects/{{project_id}}
+X-Api-Key: {{api_key}}
+Content-Type: application/json
+
+{
+  "name": "Projeto Renomeado"
+}
+
+###
+
+### Deletar projeto
+DELETE {{base}}/api/projects/{{project_id}}
+X-Api-Key: {{api_key}}
+
+
+# ═════════════════════════════════════════════════════
+# DOCUMENTOS  (requer X-Api-Key)
+# ═════════════════════════════════════════════════════
+
+### Upload de documento  (multipart/form-data)
+# No REST Client: use o caminho do arquivo local com @
+POST {{base}}/api/documents/upload
+X-Api-Key: {{api_key}}
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="id_project"
+
+{{project_id}}
+------Boundary
+Content-Disposition: form-data; name="file"; filename="documento.pdf"
+Content-Type: application/pdf
+
+< ./documento.pdf
+------Boundary--
+
+###
+
+### Listar documentos (filtros opcionais)
+GET {{base}}/api/documents/?page=1&page_size=20&id_project={{project_id}}
+X-Api-Key: {{api_key}}
+
+# Outros query params disponíveis: search=texto  doc_status=pending|processing|ready|error
+
+###
+
+### Buscar documento por ID
+GET {{base}}/api/documents/{{document_id}}
+X-Api-Key: {{api_key}}
+
+###
+
+### Atualizar metadados do documento
+PUT {{base}}/api/documents/{{document_id}}
+X-Api-Key: {{api_key}}
+Content-Type: application/json
+
+{
+  "name": "Novo nome do doc"
+}
+
+###
+
+### Reprocessar documento
+POST {{base}}/api/documents/{{document_id}}/reprocess
+X-Api-Key: {{api_key}}
+
+###
+
+### Deletar documento
+DELETE {{base}}/api/documents/{{document_id}}
+X-Api-Key: {{api_key}}
+
+
+# ═════════════════════════════════════════════════════
+# CHAT  (requer X-Api-Key)
+# ═════════════════════════════════════════════════════
+
+### Enviar mensagem (resposta completa)
+POST {{base}}/api/chat/message
+X-Api-Key: {{api_key}}
+Content-Type: application/json
+
+{
+  "message": "Qual é o prazo de entrega mencionado no contrato?",
+  "id_project": "{{project_id}}",
+  "id_thread": null,
+  "stream": false
+}
+
+###
+
+### Enviar mensagem — continuar thread existente
+POST {{base}}/api/chat/message
+X-Api-Key: {{api_key}}
+Content-Type: application/json
+
+{
+  "message": "E as penalidades por atraso?",
+  "id_project": "{{project_id}}",
+  "id_thread": "{{thread_id}}",
+  "stream": false
+}
+
+###
+
+### Listar threads do projeto
+GET {{base}}/api/chat/history?id_project={{project_id}}&page=1&page_size=20
+X-Api-Key: {{api_key}}
+
+###
+
+### Buscar mensagens de uma thread
+GET {{base}}/api/chat/history/{{thread_id}}
+X-Api-Key: {{api_key}}
