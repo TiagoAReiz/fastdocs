@@ -176,7 +176,13 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-> A connection string do Azurite já tem o valor padrão preenchido — não precisa alterar para desenvolvimento local.
+> O `AZURE_STORAGE_CONNECTION_STRING` do `.env.example` vem com `AccountKey=YOUR_KEY_HERE` como placeholder. Para desenvolvimento local com Azurite, substitua pela chave pública padrão do emulador:
+>
+> ```
+> AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+> ```
+>
+> Essa é a well-known account key do Azurite (pública, sem risco de segurança) — não confunda com uma credencial real do Azure.
 
 ### 2. Subir todos os serviços
 
@@ -197,6 +203,14 @@ curl http://localhost:8000/health
 # Swagger UI
 open http://localhost:8000/docs
 ```
+
+### 4. Testar os endpoints com `requests.http`
+
+O repositório inclui [`requests.http`](./requests.http) com o fluxo completo pronto para uso (extensão [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) no VS Code):
+
+1. Rode a request **"Criar tenant"** com seu `SERVICE_API_KEY` — a resposta traz a `api_key` do tenant (aparece uma única vez)
+2. Preencha as variáveis `@service_key`, `@api_key`, `@project_id` etc. no topo do arquivo
+3. Rode as demais requests em sequência: criar projeto → upload de documento → chat
 
 ---
 
@@ -261,6 +275,20 @@ curl -X POST http://localhost:8000/api/projects/ \
 # Listar projetos
 curl http://localhost:8000/api/projects/ \
   -H "X-API-Key: sua_chave"
+
+# Buscar projeto por ID
+curl http://localhost:8000/api/projects/<project-uuid> \
+  -H "X-API-Key: sua_chave"
+
+# Renomear projeto
+curl -X PUT http://localhost:8000/api/projects/<project-uuid> \
+  -H "X-API-Key: sua_chave" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Novo Nome"}'
+
+# Deletar projeto (soft delete)
+curl -X DELETE http://localhost:8000/api/projects/<project-uuid> \
+  -H "X-API-Key: sua_chave"
 ```
 
 ### Documents
@@ -280,8 +308,18 @@ curl http://localhost:8000/api/documents/<document-uuid> \
 curl "http://localhost:8000/api/documents?page=1&page_size=20&id_project=<project-uuid>" \
   -H "X-API-Key: sua_chave"
 
+# Atualizar metadados do documento (ex: renomear)
+curl -X PUT http://localhost:8000/api/documents/<document-uuid> \
+  -H "X-API-Key: sua_chave" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Novo nome do doc"}'
+
 # Reprocessar um documento
 curl -X POST http://localhost:8000/api/documents/<document-uuid>/reprocess \
+  -H "X-API-Key: sua_chave"
+
+# Deletar documento (soft delete)
+curl -X DELETE http://localhost:8000/api/documents/<document-uuid> \
   -H "X-API-Key: sua_chave"
 ```
 
@@ -335,7 +373,7 @@ curl http://localhost:8000/api/chat/history/<thread-uuid> \
 |---------|--------|---------|
 | `.pdf` | PyMuPDF + Tesseract | Auto-detecta páginas escaneadas |
 | `.docx` | python-docx | Preserva hierarquia de headings |
-| `.xlsx` | openpyxl | Uma sheet = uma unidade de documento |
+| `.xlsx`, `.xls` | openpyxl | Uma sheet = uma unidade de documento |
 | `.csv` | pandas | Unidades semânticas por linha |
 | `.txt` | built-in | Ingestão direta |
 | `.md` | LangChain splitter | Headers viram metadados de chunk |
