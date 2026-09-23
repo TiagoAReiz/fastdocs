@@ -39,3 +39,14 @@ decisoes_pendentes.md
 _make_samples.py
 PLANO.md
 TODO.md
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime artifacts
+celerybeat-schedule*
+celerybeat.pid
+*.log
+*.stackdump
