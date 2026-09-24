@@ -25,7 +25,7 @@ FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para s
 | Feature | Descrição |
 |---------|-----------|
 | **Admin API** | Endpoints `/admin/*` para CRUD de tenants, emissão e revogação de API Keys |
-| **Auth em camada dupla** | Rotas admin protegidas por `X-Service-Key` + IP allowlist; rotas tenant por `X-API-Key` SHA-256 |
+| **Auth em camada dupla** | Rotas admin exigem `X-Service-Key` **e** IP do peer TCP na allowlist (IP/CIDR; `X-Forwarded-For` só via proxy confiável); rotas tenant por `X-API-Key` SHA-256 |
 | **Gemini key por tenant** | Cada tenant cadastra a própria chave Gemini (criptografada com Fernet); custo isolado |
 | **Multi-tenant** | Isolamento total: toda query inclui `WHERE tenant_id = ?` na camada de repositório |
 | **Multi-formato** | PDF, DOCX, XLSX, CSV, TXT, MD, PPTX e imagens |
@@ -234,13 +234,14 @@ O mesmo fluxo roda no GitHub Actions a cada push/PR ([`.github/workflows/ci.yml`
 
 ### Admin (provisionamento de tenants)
 
-Todos os endpoints `/admin/*` exigem `X-Service-Key` e devem ser chamados de um IP cadastrado em `ADMIN_ALLOWED_IPS`.
+Todos os endpoints `/admin/*` exigem `X-Service-Key` e devem ser chamados de um IP (ou faixa CIDR) cadastrado em `ADMIN_ALLOWED_IPS`.
+
+O IP verificado é o do **peer TCP** (`request.client.host`). O header `X-Forwarded-For` é **ignorado**, a menos que o peer esteja em `TRUSTED_PROXIES`; nesse caso vale o endereço mais à direita do `X-Forwarded-For` que não seja um proxy confiável (entradas à esquerda são controladas pelo cliente e nunca são usadas sozinhas). Rodando via `docker compose`, chamadas do host chegam pelo gateway da bridge (ex.: `172.18.0.1`) — inclua-o, ou `172.16.0.0/12`, na allowlist em dev.
 
 ```bash
 # Criar tenant + emitir primeira API Key (key aparece uma única vez)
 curl -X POST http://localhost:8000/admin/tenants \
   -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "acme",
@@ -251,32 +252,27 @@ curl -X POST http://localhost:8000/admin/tenants \
 
 # Listar tenants
 curl http://localhost:8000/admin/tenants \
-  -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP"
+  -H "X-Service-Key: $SERVICE_API_KEY"
 
 # Emitir nova API Key para um tenant
 curl -X POST http://localhost:8000/admin/tenants/<tenant-uuid>/api-keys \
   -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP" \
   -H "Content-Type: application/json" \
   -d '{"label": "producao"}'
 
 # Revogar API Key
 curl -X DELETE http://localhost:8000/admin/api-keys/<key-uuid> \
-  -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP"
+  -H "X-Service-Key: $SERVICE_API_KEY"
 
 # Rotacionar chave Gemini de um tenant
 curl -X PATCH http://localhost:8000/admin/tenants/<tenant-uuid> \
   -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP" \
   -H "Content-Type: application/json" \
   -d '{"gemini_api_key": "AIzaNova..."}'
 
 # Deletar tenant (soft delete)
 curl -X DELETE http://localhost:8000/admin/tenants/<tenant-uuid> \
-  -H "X-Service-Key: $SERVICE_API_KEY" \
-  -H "X-Forwarded-For: $MEU_IP"
+  -H "X-Service-Key: $SERVICE_API_KEY"
 ```
 
 ### Projects
@@ -406,7 +402,8 @@ Crie `backend/.env` a partir de `backend/.env.example`:
 |----------|--------|-----------|
 | `SERVICE_API_KEY` | — | **Obrigatória.** Chave do caller admin (server-to-server) |
 | `ENCRYPTION_KEY` | — | **Obrigatória.** Fernet key para criptografar chaves Gemini no banco |
-| `ADMIN_ALLOWED_IPS` | — | **Obrigatória.** Lista JSON de IPs autorizados a chamar `/admin/*` |
+| `ADMIN_ALLOWED_IPS` | — | **Obrigatória.** IPs/CIDRs autorizados a chamar `/admin/*` (lista JSON ou separada por vírgula). Vazia ou com entrada inválida → admin negado |
+| `TRUSTED_PROXIES` | `[]` | IPs/CIDRs de reverse proxies cujo `X-Forwarded-For` é confiável. Vazio → `X-Forwarded-For` ignorado |
 | `DATABASE_URL` | `postgresql+asyncpg://fastdocs:fastdocs@postgres:5432/fastdocs` | URL do Postgres |
 | `REDIS_URL` | `redis://redis:6379/0` | URL do Redis |
 | `AZURE_STORAGE_CONNECTION_STRING` | string Azurite padrão | Connection string do Blob Storage |
@@ -501,7 +498,7 @@ fastdocs/
 |----------|----------------------|-----------|
 | **Gemini key por tenant** | Key global no `.env` | Isola custo por cliente; chave faturada para o tenant não para o serviço |
 | **Fernet** para criptografia das keys | KMS (Vault/AWS) | Suficiente para MVP; master key no `.env`; KMS é upgrade natural |
-| **IP allowlist + service key** para admin | OAuth / JWT | Caller é server-to-server conhecido; dupla camada sem infra extra |
+| **IP allowlist + service key** para admin | OAuth / JWT | Caller é server-to-server conhecido; dois fatores independentes (segredo + origem de rede) sem infra extra |
 | **pgvector** no Postgres | Qdrant, Chroma, Pinecone | Sem serviço extra; joins relacionais + vetoriais em uma query |
 | **Outbox Pattern** com LISTEN/NOTIFY | Publish direto no Redis | Elimina dual-write SPOF; eventos nunca são perdidos |
 | **Celery** para tasks | FastAPI BackgroundTasks | Tasks sobrevivem restarts; retry e monitoring nativos |
@@ -514,7 +511,7 @@ fastdocs/
 
 ## Segurança
 
-- **Admin**: dupla camada — `X-Service-Key` (constant-time compare) + IP allowlist. Ambas obrigatórias
+- **Admin**: dupla camada — `X-Service-Key` (comparação constant-time via `hmac.compare_digest`) + IP allowlist (IP/CIDR), ambas obrigatórias. A allowlist usa o IP do peer TCP; `X-Forwarded-For` só é considerado quando o peer está em `TRUSTED_PROXIES` (endereço não confiável mais à direita). Configuração inválida nega acesso (fail closed)
 - **API Keys de tenant**: apenas o hash SHA-256 é armazenado — plaintext exibido uma única vez na criação
 - **Chaves Gemini**: armazenadas criptografadas com Fernet; descriptografadas em memória apenas durante a request/task
 - **Isolamento de tenant**: toda query inclui `WHERE tenant_id = ?` — aplicado na camada de repositório
@@ -526,7 +523,7 @@ fastdocs/
 ## O que está implementado
 
 - [x] **Admin API** — CRUD de tenants, emissão/revogação de API Keys, rotação de chave Gemini
-- [x] **Auth em camada dupla** — `X-Service-Key` + IP allowlist para admin; `X-API-Key` SHA-256 para tenants
+- [x] **Auth em camada dupla** — `X-Service-Key` + IP allowlist (peer TCP, proxies confiáveis explícitos) para admin; `X-API-Key` SHA-256 para tenants
 - [x] **Gemini key por tenant** — criptografada com Fernet, validada contra a API do Google no cadastro
 - [x] Auth multi-tenant com API Keys (hash SHA-256, isolamento por tenant)
 - [x] Pipeline de ingestão (PDF, DOCX, XLSX, CSV, TXT, MD, PPTX, imagens)

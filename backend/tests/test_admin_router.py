@@ -44,10 +44,11 @@ async def test_admin_wrong_service_key_returns_401(client: AsyncClient):
 async def test_admin_ip_not_allowed_returns_403(client: AsyncClient, monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "ADMIN_ALLOWED_IPS", ["10.0.0.99"])
-    # X-Forwarded-For: 127.0.0.1 is NOT in the patched allowlist → 403
+    # Socket peer (127.0.0.1) is NOT in the patched allowlist → 403, and a spoofed
+    # X-Forwarded-For claiming the allowlisted IP must not help.
     resp = await client.get(
         "/admin/tenants",
-        headers={"X-Service-Key": settings.SERVICE_API_KEY, "X-Forwarded-For": "127.0.0.1"},
+        headers={"X-Service-Key": settings.SERVICE_API_KEY, "X-Forwarded-For": "10.0.0.99"},
     )
     assert resp.status_code == 403
 

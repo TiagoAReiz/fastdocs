@@ -1,5 +1,8 @@
+import json
+from typing import Annotated
+
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
@@ -20,13 +23,23 @@ class Settings(BaseSettings):
 
     # Admin auth — service-to-service layer
     SERVICE_API_KEY: str = ""
-    ADMIN_ALLOWED_IPS: list[str] = []
+    # IPs or CIDRs allowed to call /admin/* (e.g. ["10.0.0.5", "10.1.0.0/16"]).
+    ADMIN_ALLOWED_IPS: Annotated[list[str], NoDecode] = []
+    # IPs or CIDRs of reverse proxies whose X-Forwarded-For is trusted.
+    # Empty (default) = X-Forwarded-For is ignored and the socket peer is used.
+    TRUSTED_PROXIES: Annotated[list[str], NoDecode] = []
     ENCRYPTION_KEY: str = ""  # Fernet key (urlsafe base64, 32 bytes)
 
-    @field_validator("ADMIN_ALLOWED_IPS", mode="before")
+    @field_validator("ADMIN_ALLOWED_IPS", "TRUSTED_PROXIES", mode="before")
     @classmethod
     def _parse_ip_list(cls, v: object) -> object:
-        if isinstance(v, str) and not v.startswith("["):
+        # Accepts a JSON list ('["10.0.0.1","10.1.0.0/16"]') or a comma-separated
+        # string ("10.0.0.1, 10.1.0.0/16"). Entry validity is checked (fail closed)
+        # in require_admin, so a typo denies admin access instead of crashing startup.
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                return json.loads(v)
             return [ip.strip() for ip in v.split(",") if ip.strip()]
         return v
 
