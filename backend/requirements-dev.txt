@@ -2,3 +2,4 @@
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
 httpx>=0.27.0
+psycopg2-binary>=2.9.0  # sync engine used by tests/conftest.py for schema setup

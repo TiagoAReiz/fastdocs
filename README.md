@@ -1,4 +1,5 @@
 <p align="center">
+  <a href="https://github.com/TiagoAReiz/fastdocs/actions/workflows/ci.yml"><img src="https://github.com/TiagoAReiz/fastdocs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.12+-blue?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-agent-purple?logo=langchain&logoColor=white" alt="LangGraph">
@@ -10,6 +11,10 @@
 # FastDocs
 
 > **Multi-tenant RAG microservice** — ingere documentos, indexa como embeddings vetoriais e responde perguntas em linguagem natural, tudo por trás de uma simples API Key.
+
+```bash
+cp backend/.env.example backend/.env && docker compose up --build   # → http://localhost:8000/docs
+```
 
 FastDocs é um serviço de Retrieval-Augmented Generation (RAG) projetado para ser consumido por outras aplicações. Cada consumidor (tenant) possui coleções de documentos, threads de chat e contexto de queries isolados, acessíveis através do header `X-API-Key`. Tenants e API Keys são provisionados via API administrativa protegida, e cada tenant traz a própria chave Gemini — o custo de LLM fica isolado por cliente.
 
@@ -176,13 +181,9 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-> O `AZURE_STORAGE_CONNECTION_STRING` do `.env.example` vem com `AccountKey=YOUR_KEY_HERE` como placeholder. Para desenvolvimento local com Azurite, substitua pela chave pública padrão do emulador:
+> Só `/health` e `/docs` funcionam com os placeholders; `SERVICE_API_KEY` e `ENCRYPTION_KEY` são necessárias para provisionar tenants.
 >
-> ```
-> AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
-> ```
->
-> Essa é a well-known account key do Azurite (pública, sem risco de segurança) — não confunda com uma credencial real do Azure.
+> O `AZURE_STORAGE_CONNECTION_STRING` do `.env.example` já vem com a well-known account key do Azurite (pública, apenas para o emulador local) — não é uma credencial real do Azure.
 
 ### 2. Subir todos os serviços
 
@@ -211,6 +212,21 @@ O repositório inclui [`requests.http`](./requests.http) com o fluxo completo pr
 1. Rode a request **"Criar tenant"** com seu `SERVICE_API_KEY` — a resposta traz a `api_key` do tenant (aparece uma única vez)
 2. Preencha as variáveis `@service_key`, `@api_key`, `@project_id` etc. no topo do arquivo
 3. Rode as demais requests em sequência: criar projeto → upload de documento → chat
+
+### 5. Rodar os testes
+
+A suíte usa um Postgres com pgvector real (banco `fastdocs_test`, derivado do `DATABASE_URL`); Redis, Blob Storage e Gemini são mockados.
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres createdb -U fastdocs fastdocs_test
+
+cd backend
+pip install -r requirements-dev.txt
+DATABASE_URL=postgresql+asyncpg://fastdocs:fastdocs@localhost:5432/fastdocs pytest -q
+```
+
+O mesmo fluxo roda no GitHub Actions a cada push/PR ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)).
 
 ---
 
@@ -408,6 +424,7 @@ Crie `backend/.env` a partir de `backend/.env.example`:
 
 ```
 fastdocs/
+├── .github/workflows/ci.yml    # pytest + Postgres/pgvector no GitHub Actions
 ├── docker-compose.yml          # 7 serviços
 ├── azurite.Dockerfile          # Emulador Azure Blob
 │
@@ -416,6 +433,7 @@ fastdocs/
     ├── Dockerfile.worker       # Celery worker (inclui Tesseract/Poppler)
     ├── Dockerfile.relay        # Outbox relay
     ├── requirements.txt
+    ├── requirements-dev.txt    # pytest, pytest-asyncio, httpx, psycopg2
     ├── .env.example
     │
     ├── alembic/
@@ -525,14 +543,14 @@ fastdocs/
 - [x] Migrations Alembic (schema inicial + webhook + gemini key)
 - [x] Pipeline de limpeza de texto (normalização de encoding, dedup)
 - [x] Reprocessamento de documentos (`POST /documents/{id}/reprocess`)
-- [x] Suíte de testes (pytest — 15 arquivos)
+- [x] Suíte de testes (pytest — 15 arquivos) rodando em CI (GitHub Actions)
 
 ---
 
 ## Roadmap
 
 - [ ] Logging estruturado com correlation IDs por request
-- [ ] CI/CD com GitHub Actions
+- [ ] CD (deploy automatizado)
 - [ ] Observabilidade (endpoint de métricas, Prometheus/Grafana)
 
 ---

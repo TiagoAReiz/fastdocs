@@ -31,8 +31,7 @@ async def update(db: AsyncSession, tenant: Tenant, **fields: object) -> Tenant:
 
 
 async def soft_delete(db: AsyncSession, tenant: Tenant) -> None:
-    from datetime import datetime, timezone
-    tenant.deleted_at = datetime.now(timezone.utc)
+    tenant.deleted_at = func.now()
     await db.flush()
 
 
