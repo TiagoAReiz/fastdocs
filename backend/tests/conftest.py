@@ -117,8 +117,8 @@ def auth_headers(api_key_plain) -> dict[str, str]:
 @pytest.fixture
 def admin_headers() -> dict[str, str]:
     return {
+        # httpx's ASGITransport reports the socket peer as 127.0.0.1 (allowlisted above)
         "X-Service-Key": settings.SERVICE_API_KEY,
-        "X-Forwarded-For": "127.0.0.1",
     }
 
 
